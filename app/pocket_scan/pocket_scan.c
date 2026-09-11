@@ -32,17 +32,23 @@ static void show_usage(void)
 
 // get USB device string ---------------------------------------------------------------
 #ifndef WIN32
-static void get_usb_string(struct libusb_device *dev, char *name, size_t size)
+static void get_usb_string(struct libusb_device *dev,
+    const struct libusb_device_descriptor *desc, char *name, size_t size)
 {
     libusb_device_handle *h;
     char *p = name, buff[64];
+    const uint8_t indices[] = {
+        desc->iManufacturer, desc->iProduct, desc->iSerialNumber
+    };
     
     name[0] ='\0';
     
     if (libusb_open(dev, &h)) return;
     
-    for (int i = 1; i < 5; i++) {
-        if (libusb_get_string_descriptor_ascii(h, i, (uint8_t *)buff,
+    // Query only string indices advertised by the device descriptor.
+    for (size_t i = 0; i < sizeof(indices) / sizeof(indices[0]); i++) {
+        if (!indices[i]) continue;
+        if (libusb_get_string_descriptor_ascii(h, indices[i], (uint8_t *)buff,
                 sizeof(buff)) < 0) {
             break;
         }
@@ -98,7 +104,7 @@ static int scan_usb(int ep)
         
         if (libusb_get_device_descriptor(devs[i], &desc) < 0) continue;
         
-        get_usb_string(devs[i], str, sizeof(str));
+        get_usb_string(devs[i], &desc, str, sizeof(str));
         
         printf("(%2d) BUS=%2d PORT=%2d SPEED=%-5s ID=%04X:%04X %s\n", i,
              libusb_get_bus_number(devs[i]), libusb_get_port_number(devs[i]),
