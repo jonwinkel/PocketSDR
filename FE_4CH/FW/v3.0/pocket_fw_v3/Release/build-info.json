@@ -1,0 +1,128 @@
+{
+  "artifacts": {
+    "LICENSE.txt": "39c288fca458c029c607ae8331b5923eb41f34a3f5eb4a4523917d4fbf2eba36",
+    "build-recipe.py": "55f7e0811798d4a008278c2cd44db8c090aa78afe3b3e8222856b9874bcbebf5",
+    "pocket_fw_v3.elf": "6f4074535375ec4a10e8439c284429bfd28dbee6f38d743fa2fc1d52e1223be8",
+    "pocket_fw_v3.img": "7a1f04e4c49a2e4d0c25a05b17743908f7c1eb615722f62b1a9ef55dec1eb307"
+  },
+  "device": "pocketsdr",
+  "recipe_sha256": "55f7e0811798d4a008278c2cd44db8c090aa78afe3b3e8222856b9874bcbebf5",
+  "schema_version": 1,
+  "sdk_files": {
+    "fw_build/fx3_fw/fx3.ld": "04a98025e1f1ebc499ab9de2d38221883a230dead91e4b219f8430106059000d",
+    "fw_lib/1_3_5/fx3_release/libcy_as0260.a": "b58381c61547459a52b6ac01e2f5becc6b457c4a96e874aa04bad30c31b3433e",
+    "fw_lib/1_3_5/fx3_release/libcy_ov5640.a": "cd6d20cea2d2c687fc9ec63a5a9f951598e41465a7260559ead8d4788bf0305b",
+    "fw_lib/1_3_5/fx3_release/libcyfxapi.a": "0db3e29b4cf48cdbea0b9090ef40a1cbd84957ea6d710eac2932f7b21d0d57b9",
+    "fw_lib/1_3_5/fx3_release/libcyu3lpp.a": "e477a7a2c69b726ac82e9a2ec63b882afc3b8ee476cf29088f486d0ee1529efa",
+    "fw_lib/1_3_5/fx3_release/libcyu3mipicsi.a": "c774148c4dd30f33e1f406863e5c64972be3985cffaa67ae88ccca8c487c05f5",
+    "fw_lib/1_3_5/fx3_release/libcyu3sport.a": "f81b143b3ff3de4d443e5cadf6296e498601b36f31157ccd083f834b5f25427c",
+    "fw_lib/1_3_5/fx3_release/libcyu3threadx.a": "3a0339de72a5547f5c23e7c8e103ad447ac170bac68e4f8444de16ea27b28384",
+    "fw_lib/1_3_5/inc/cyfx3_api.h": "f82221e026c583e7a5378c2e189e16de8ea385bba7c6d39983474c67f2d74354",
+    "fw_lib/1_3_5/inc/cyfxapidesc.h": "e20021f0fbecdbffb296882215d868856b1bcedcf193fd3567c88def64f6c7ff",
+    "fw_lib/1_3_5/inc/cyfxversion.h": "34a493e88efc96f390805c83f32e36911a570dc063ee260799f827fba94f17fd",
+    "fw_lib/1_3_5/inc/cyu3cardmgr.h": "acaaabc900aa4f70450bf7df401bf0c8caf6fc83d3016deee6404e5587426d47",
+    "fw_lib/1_3_5/inc/cyu3cardmgr_fx3s.h": "8628f2b83d65be08b187e04b9953112521310cffe8162a8308bbe79a005a9128",
+    "fw_lib/1_3_5/inc/cyu3descriptor.h": "33f8ea904e7f2229c5e952502ff79d17967eaa190598112f2e3861e2bad8f82b",
+    "fw_lib/1_3_5/inc/cyu3dma.h": "17a3d7c1956150028acfe49c4a7a3442229918f017856667024fd2fa64a9e6f2",
+    "fw_lib/1_3_5/inc/cyu3error.h": "ad444d35ee30bf3130afeca9491d37ff3a51df4c7a1984953f88010cfcfd943b",
+    "fw_lib/1_3_5/inc/cyu3externcend.h": "2c162fa86a43a977ed7781c3b674d8fa80827a63cf5e9af30ccb317c35e0557a",
+    "fw_lib/1_3_5/inc/cyu3externcstart.h": "b6f0393532a2a03fbe554c6fb7d30d512d75970d776a1288e36279d13300ac98",
+    "fw_lib/1_3_5/inc/cyu3gpif.h": "dc4ac56b11a3b7664a92cd8ae6313f1634de0b644df9fb7b95348fc6c0a1fba5",
+    "fw_lib/1_3_5/inc/cyu3gpio.h": "20bf517212b170e5e0d9401d80d790166b636f4983529fc47c0d79cba356329e",
+    "fw_lib/1_3_5/inc/cyu3i2c.h": "61336705eb37bb6f97f121034ab72760454ad3eb46dbe45248b719bb1cd91879",
+    "fw_lib/1_3_5/inc/cyu3i2s.h": "26c69d469adb8f65d619a8dc719798d74982d918a0e55b75b1ee3a664969dcce",
+    "fw_lib/1_3_5/inc/cyu3imagesensor.h": "2faa341ea1d6397270c37d9d0a4fe5d2c70bd4b05923e4d77b5744302ebb60b8",
+    "fw_lib/1_3_5/inc/cyu3lpp.h": "bc1e370102ef5bbe06b0e32f55067435a617783d10370335564d85ebac992c2c",
+    "fw_lib/1_3_5/inc/cyu3mbox.h": "dae7bbc60ff195f6b10780213a14df3640ca5759376f931146e6a422c4c1ac58",
+    "fw_lib/1_3_5/inc/cyu3mipicsi.h": "c45d80c726f8d6b8f64c50b19c121338d812690cfba41507269d9997f2521c44",
+    "fw_lib/1_3_5/inc/cyu3mmu.h": "6e20a19721447196917ceeb04f5ef62d5950e6a927197096773f86fbf58ecc22",
+    "fw_lib/1_3_5/inc/cyu3os.h": "8352b34d234442743eae05995254feac6fa6510dff23aa4634dad4acdef26dec",
+    "fw_lib/1_3_5/inc/cyu3pib.h": "515fbdc7619b29c5c5d31de29b51480dfc483259b5afa7d55d1413299579fd9c",
+    "fw_lib/1_3_5/inc/cyu3sib.h": "1d25870053a513b9a0b83b46556bf961dd484f894ed95c53da7ede3f0e53125f",
+    "fw_lib/1_3_5/inc/cyu3sibpp.h": "8e40f920496b1482015a69d8ae3d81993181421ebdfec0833993101cadee98f3",
+    "fw_lib/1_3_5/inc/cyu3socket.h": "c7073732996db0c1536dc43a0a450cdda705eee0c60f85a8fe310047fe0dcb0f",
+    "fw_lib/1_3_5/inc/cyu3spi.h": "abbcf9096ec11d7d2a9ef2e3bf0ea5aa1579e884940b11e3e7b04e802bc3af4b",
+    "fw_lib/1_3_5/inc/cyu3system.h": "128fd536faa08ed8b647e56078bdfc216166c32fa24bb681ff30ca107a4992c8",
+    "fw_lib/1_3_5/inc/cyu3tx.h": "857b5ebd65b24369760992be049de17365e69222ad8a6bd3b9da5a43100c35ec",
+    "fw_lib/1_3_5/inc/cyu3types.h": "ec2b1efc47cef3c19179c3a5c9984f5c3bd18fa6db84f5dd1ae9af10b6c87475",
+    "fw_lib/1_3_5/inc/cyu3uart.h": "93b0c217cd2b045c67c0aa92b920592849e04cdca05bfca6e5eed017355e3854",
+    "fw_lib/1_3_5/inc/cyu3usb.h": "42318f2a69f48d0fbcd33d306dbe0029c72fac78abfef8d2211c215067ee7ca0",
+    "fw_lib/1_3_5/inc/cyu3usbconst.h": "acde99837eaf01bfa30291c429e0335cfd79c478a95dafd814078ff0a9d5306f",
+    "fw_lib/1_3_5/inc/cyu3usbhost.h": "ae8f5b3cd45cf9aa7474bd951ff53057aa1f148d94da8b729cbb4f0f0fdc3e8f",
+    "fw_lib/1_3_5/inc/cyu3usbotg.h": "99b32e1feb8cd4e5afade8e2be2296c94a00c01d52f3325a5954306929ff07f0",
+    "fw_lib/1_3_5/inc/cyu3utils.h": "bc586faebf75ba2e5f69702f5cc4693b01c896896b1fd699bd60b3b313c58630",
+    "fw_lib/1_3_5/inc/cyu3vic.h": "6106a5c8e90eaf2b7d7dd358542072318b88dd2b0f18513167462236a4a02e18",
+    "fw_lib/1_3_5/inc/gpif_regs.h": "3affb00caf981f4341e6d7121e212390fc1702caa919f24d10898b6c4e7b11d7",
+    "fw_lib/1_3_5/inc/gpio_regs.h": "79734dd26b26144dcd61255fe27732eacc1d9c91ceb3df2e5b36b4caa6d519ca",
+    "fw_lib/1_3_5/inc/i2c_regs.h": "c0e37980ec82d0d12b68e33aae654e49bc5a50691d4770c824d74464b0535403",
+    "fw_lib/1_3_5/inc/i2s_regs.h": "e7acbf50e84bdcbd3a3a36285d79ea7763cae2de5fbc993940c34f47fdb59581",
+    "fw_lib/1_3_5/inc/pib_regs.h": "4d70498f437ee84af887ebbf5a9f6496a726667de775c1b126209b00430a9d4b",
+    "fw_lib/1_3_5/inc/pp_regs.h": "891a08c4ace12f70e67d6b8ecaf160fb78cf8c65872ea26acc9f4d6aaf6d9d3b",
+    "fw_lib/1_3_5/inc/sock_regs.h": "04162b994d3765d1e29374d3f68417f6b4275090bf245817f1b098914e089fb7",
+    "fw_lib/1_3_5/inc/spi_regs.h": "251e8275fc8d7c42fab35ad3fa14141c109954ec108f1bb183ad002ee6adc176",
+    "fw_lib/1_3_5/inc/tx_api.h": "4160f81ff468ec02d81651c0f36338eed410647ba372e59542878fe6990da921",
+    "fw_lib/1_3_5/inc/tx_port.h": "55c7d76a4aef2c8e6b7eb2850d578b7d79a215899368358df3595e890ab1f648",
+    "fw_lib/1_3_5/inc/tx_user.h": "ec1aad6737d2e40f5d79dae9458c7b1747dfc47f413b5549ccc99aa9f5ba4bd3",
+    "fw_lib/1_3_5/inc/uart_regs.h": "10abca2b28999e848eb9a97f32f7d2202a2f9d7738b004d2de102bc45123d8f4",
+    "util/elf2img/elf2img.c": "7ddeb985921f292b0839c9cfcb7f3a774c307ac8821f6089ca044e08e0b67496"
+  },
+  "source": {
+    "path": "external/pocketsdr",
+    "revision": "917e3952690eded83941827e2efe30e652507e88",
+    "submodules": [],
+    "upstream": "https://github.com/tomojitakasu/PocketSDR.git",
+    "upstream_base": "03787da53c65a8eb291eec571b6412ec470aeb17",
+    "url": "https://github.com/jonwinkel/PocketSDR.git"
+  },
+  "specification": {
+    "compatibility": {
+      "device_sample_counter": false,
+      "firmware_major": 3,
+      "rf_channels": 4,
+      "sample_transport": "RAW16"
+    },
+    "firmware": {
+      "board": "FE_4CH",
+      "build_configuration": "pocket_fw_v3/Release",
+      "compiler": "arm-none-eabi-gcc",
+      "host_compiler": "cc",
+      "images": [
+        "Release/pocket_fw_v3.img"
+      ],
+      "platforms": [
+        "Linux",
+        "Windows"
+      ],
+      "project": "FE_4CH/FW/v3.0/pocket_fw_v3",
+      "sdk": "Cypress FX3 SDK 1.3.5",
+      "sdk_library_directory": "fw_lib/1_3_5"
+    },
+    "host": {
+      "architectures": [
+        "x86_64"
+      ],
+      "cc": "gcc",
+      "cxx": "g++",
+      "make_options": [
+        "USE_SOAPY=0",
+        "USE_FFTW=1",
+        "USE_AVX2=0"
+      ],
+      "platform": "Linux"
+    },
+    "schema_version": 1,
+    "source": "external/pocketsdr",
+    "upstream": "https://github.com/tomojitakasu/PocketSDR.git",
+    "upstream_base": "03787da53c65a8eb291eec571b6412ec470aeb17"
+  },
+  "toolchain": {
+    "compiler": "arm-none-eabi-gcc (SUSE Linux) 15.3.0",
+    "host_compiler": "cc (SUSE Linux) 16.2.0",
+    "platform": "Linux",
+    "sdk": "Cypress FX3 SDK 1.3.5"
+  },
+  "validation": {
+    "hardware": "not loaded; WSL ROM bootloader import failed before any firmware write",
+    "software": "native lifecycle harness and independent IMG/ELF validation passed"
+  }
+}
