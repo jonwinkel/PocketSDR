@@ -31,7 +31,7 @@
 #include "gpif_conf.h"
 
 // constants and macros --------------------------------------------------------
-#define VER_FW       0x30       // Firmware version
+#define VER_FW       0x31       // Firmware version
 #ifndef F_TCXO
 #define F_TCXO       24000      // TCXO frequency (kHz)
 #endif
@@ -107,6 +107,8 @@ static CyU3PDmaMultiChannel dma_ch; // DMA channel for bulk transfer
 static uint8_t usb_event = 0;       // USB event state
 static uint8_t app_act = 0;         // application active
 static uint8_t bulk_act = 0;        // bulk transfer active
+static uint8_t ep_act = 0;          // bulk endpoint configured
+static uint16_t bulk_size = 0;      // DMA buffer size (bytes)
 static uint8_t EP0BUFF[128] __attribute__ ((aligned (32))); // EP0 data buffer
 
 // IO ports definitions
@@ -343,37 +345,75 @@ static int save_settings(void)
 // stop bulk transfer ----------------------------------------------------------
 static int stop_bulk(void)
 {
-    if (!bulk_act) return 0;
-    
-    // stop DMA channel
-    if (CyU3PDmaMultiChannelSetSuspend(&dma_ch, CyFalse, CyTrue)) return 0;
+    CyU3PGpifDisable(CyFalse);
     bulk_act = 0;
-    return 1;
+    if (!app_act) return 1;
+
+    if (CyU3PUsbSetEpNak(EP_BULK_IN, CyTrue)) return 0;
+    CyU3PBusyWait(125); // allow in-flight USB transactions to finish
+    int ok = !CyU3PDmaMultiChannelReset(&dma_ch);
+    if (CyU3PUsbFlushEp(EP_BULK_IN)) ok = 0;
+    return ok;
 }
 
 // start bulk transfer ---------------------------------------------------------
 static int start_bulk(void)
 {
-    if (bulk_act) {
+    if (!app_act || !ep_act) return 0;
+    if (bulk_act) return 1;
+    if (!stop_bulk()) return 0;
+
+    CyU3PGpifInitDataCounter(0, bulk_size / 2 - 2, CyFalse, CyTrue, 1);
+    // GPIF and DMA must both start with producer socket 0.
+    if (CyU3PDmaMultiChannelSetXfer(&dma_ch, 0, 0) ||
+        CyU3PUsbSetEpNak(EP_BULK_IN, CyFalse) ||
+        CyU3PGpifSMStart(RESET, ALPHA_RESET)) {
         stop_bulk();
-        CyU3PThreadSleep(100);
+        return 0;
     }
-    // start DMA channel
-    if (CyU3PDmaMultiChannelResume(&dma_ch, CyFalse, CyTrue)) return 0;
     bulk_act = 1;
     return 1;
+}
+
+// stop application (USB reset/disconnect already quiesces the endpoint) --------
+static int app_stop(CyBool_t usb_reset)
+{
+    CyU3PGpifDisable(CyFalse);
+    bulk_act = 0;
+    if (usb_reset) ep_act = 0;
+    if (ep_act) {
+        CyU3PReturnStatus_t stat = CyU3PUsbSetEpNak(EP_BULK_IN, CyTrue);
+        if (stat == CY_U3P_ERROR_BAD_ARGUMENT || stat == CY_U3P_ERROR_NOT_STARTED) {
+            ep_act = 0; // the USB stack has already removed the endpoint
+        }
+        else if (stat) return 0;
+        else CyU3PBusyWait(125);
+    }
+    if (app_act) {
+        if (CyU3PDmaMultiChannelDestroy(&dma_ch)) return 0;
+        app_act = 0;
+    }
+    int ok = 1;
+    if (ep_act) {
+        if (CyU3PUsbFlushEp(EP_BULK_IN)) ok = 0;
+        CyU3PEpConfig_t ecfg = {0};
+        if (CyU3PSetEpConfig(EP_BULK_IN, &ecfg)) return 0;
+        ep_act = 0;
+    }
+    return ok;
 }
 
 // start application -----------------------------------------------------------
 static int app_start(void)
 {
     if (app_act) return 1;
-    
+    if (ep_act && !app_stop(CyFalse)) return 0;
+
     CyU3PUSBSpeed_t speed = CyU3PUsbGetSpeed();
     if (speed != CY_U3P_HIGH_SPEED && speed != CY_U3P_SUPER_SPEED) return 0;
     uint16_t pckt_size = (speed == CY_U3P_HIGH_SPEED) ? 512 : 1024;
     uint8_t burst_len  = (speed == CY_U3P_HIGH_SPEED) ? 1 : BURST_LEN;
-    
+
     // enable bulk IN endpoint
     CyU3PEpConfig_t ecfg = {0};
     ecfg.enable = CyTrue;
@@ -381,7 +421,12 @@ static int app_start(void)
     ecfg.pcktSize = pckt_size;
     ecfg.burstLen = burst_len;
     if (CyU3PSetEpConfig(EP_BULK_IN, &ecfg)) return 0;
-    
+    ep_act = 1;
+    if (CyU3PUsbSetEpNak(EP_BULK_IN, CyTrue)) {
+        app_stop(CyFalse);
+        return 0;
+    }
+
     // generate DMA channel
     CyU3PDmaMultiChannelConfig_t dcfg = {0};
     dcfg.size = burst_len * pckt_size;
@@ -394,38 +439,11 @@ static int app_start(void)
     dcfg.notification = CY_U3P_DMA_CB_PROD_EVENT;
     if (CyU3PDmaMultiChannelCreate(&dma_ch, CY_U3P_DMA_TYPE_AUTO_MANY_TO_ONE,
         &dcfg)) {
+        app_stop(CyFalse);
         return 0;
     }
-    // set data counter for socket switch
-    CyU3PGpifInitDataCounter(0, dcfg.size / 2 - 2, CyFalse, CyTrue, 1);
-    
-    // prepare and suspend DMA channel
-    if (CyU3PDmaMultiChannelSetXfer(&dma_ch, 0, 0) ||
-        CyU3PDmaMultiChannelSetSuspend(&dma_ch, CyFalse, CyTrue)) {
-        return 0;
-    }
+    bulk_size = dcfg.size;
     app_act = 1;
-    return 1;
-}
-
-// stop application ------------------------------------------------------------
-static int app_stop(void)
-{
-    if (!app_act) return 1;
-    
-    stop_bulk();
-    
-    // flush buffer
-    CyU3PUsbFlushEp(EP_BULK_IN);
-    
-    // disable bulk IN endpoint
-    CyU3PEpConfig_t ecfg = {0};
-    if (CyU3PSetEpConfig(EP_BULK_IN, &ecfg)) return 0;
-    
-    // destroy DMA channel
-    CyU3PDmaMultiChannelDestroy(&dma_ch);
-    
-    app_act = 0;
     return 1;
 }
 
@@ -496,13 +514,13 @@ static int handle_req(uint8_t req, uint16_t val, uint16_t len)
         if (!write_reg(ch, addr, reg)) return 0;
     }
     else if (req == VR_START) {
-        start_bulk();
+        if (!start_bulk()) return 0;
     }
     else if (req == VR_STOP) {
-        stop_bulk();
+        if (!stop_bulk()) return 0;
     }
     else if (req == VR_RESET) {
-        if (!app_stop() || !app_start()) return 0;
+        if (!app_stop(CyFalse) || !app_start()) return 0;
     }
     else if (req == VR_SAVE) {
         if (!save_settings()) return 0;
@@ -565,13 +583,13 @@ static void usb_event_cb(CyU3PUsbEventType_t event, uint16_t data)
 {
     if (event == CY_U3P_USB_EVENT_SETCONF) {
         CyU3PUsbLPMDisable();
-        if (!app_stop() || !app_start()) {
+        if (!app_stop(CyFalse) || !app_start()) {
             app_error();
         }
     }
     else if (event == CY_U3P_USB_EVENT_RESET ||
              event == CY_U3P_USB_EVENT_DISCONNECT) {
-        if (!app_stop()) {
+        if (!app_stop(CyTrue)) {
             app_error();
         }
     }
@@ -598,9 +616,6 @@ static int app_init(void)
     
     // load GPIF configuration
     if (CyU3PGpifLoad(&CyFxGpifConfig)) return 0;
-    
-    // start GPIF state machine
-    if (CyU3PGpifSMStart(RESET, ALPHA_RESET)) return 0;
     
     // initialize GPIO module
     CyU3PGpioClock_t gclk = {0};
