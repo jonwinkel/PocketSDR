@@ -1,0 +1,27 @@
+{
+  "image": "pocket_fw_v3.img",
+  "bytes": 110368,
+  "entry": "0x40006f68",
+  "checksum": "0x245123fc",
+  "load_blocks": [
+    {
+      "address": "0x100",
+      "bytes": 9600
+    },
+    {
+      "address": "0x40003000",
+      "bytes": 65536
+    },
+    {
+      "address": "0x40013000",
+      "bytes": 27612
+    },
+    {
+      "address": "0x40030000",
+      "bytes": 7572
+    }
+  ],
+  "sha256": "ea8ae06ec91041cedcbd21729879187253613d671f9e0cfcc348efb08440934b",
+  "elf_load_data_matches": true,
+  "hardware": "Not loaded; awaiting native Linux RAM acceptance. Installed EEPROM remains 3.1."
+}
