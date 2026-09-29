@@ -19,6 +19,11 @@ static int gpif_socket, dma_socket, acknowledgements, starts;
 static uint32_t counter_limit;
 static uint16_t buffer_size;
 static CyU3PUSBSpeed_t usb_speed;
+static uint16_t sent_length, phy_errors, link_errors;
+static uint8_t sent_bytes[160];
+static CyU3PReturnStatus_t diagnostic_error;
+static int socket_reads;
+
 
 // Fail one SDK operation to exercise recovery paths.
 static CyU3PReturnStatus_t result(enum operation op)
@@ -39,6 +44,15 @@ static void reset_fixture(void)
     app_act = bulk_act = ep_act = usb_event = 0;
     bulk_size = buffer_size = 0;
     counter_limit = 0;
+    diag_epoch = diag_phy_errors = diag_link_errors = 0;
+    diag_unhandled_setup = diag_last_setup0 = diag_last_setup1 = 0;
+    diag_clear_halt = diag_last_setup_ms = 0;
+    diag_resets = diag_disconnects = diag_suspends = diag_resumes = 0;
+    diag_link_failures = diag_recoveries = diag_underruns = 0;
+    diag_pib_errors = diag_last_pib = diag_last_usb = diag_lpm = 0;
+    sent_length = phy_errors = link_errors = 0;
+    diagnostic_error = CY_U3P_SUCCESS;
+    socket_reads = 0;
     usb_speed = CY_U3P_SUPER_SPEED;
     assert(app_init());
     assert(loaded && !running && !created);
@@ -124,6 +138,7 @@ CyU3PReturnStatus_t CyU3PDmaMultiChannelCreate(CyU3PDmaMultiChannel *handle,
 {
     assert(endpoint && nak && !created && !running);
     assert(type == CY_U3P_DMA_TYPE_AUTO_MANY_TO_ONE && cfg->validSckCount == 2);
+    assert(cfg->cb == NULL && cfg->notification == CY_U3P_DMA_CB_PROD_EVENT);
     assert(cfg->prodSckId[0] == CY_U3P_PIB_SOCKET_0);
     assert(cfg->prodSckId[1] == CY_U3P_PIB_SOCKET_1);
     assert(cfg->size == (usb_speed == CY_U3P_SUPER_SPEED ? 16384 : 512));
@@ -204,11 +219,62 @@ SDK_OK(CyU3PReturnStatus_t, CyU3PUsbSetDesc,
 SDK_OK(CyU3PReturnStatus_t, CyU3PUsbLPMDisable, (void))
 SDK_OK(CyU3PReturnStatus_t, CyU3PUsbGetEP0Data,
     (uint16_t count, uint8_t *buffer, uint16_t *received))
-SDK_OK(CyU3PReturnStatus_t, CyU3PUsbSendEP0Data, (uint16_t count, uint8_t *buffer))
+
 SDK_OK(CyU3PReturnStatus_t, CyU3PUsbStall, (uint8_t ep, CyBool_t stall, CyBool_t toggle))
 SDK_VOID(CyU3PUsbRegisterSetupCallback, (CyU3PUSBSetupCb_t cb, CyBool_t fast))
 SDK_VOID(CyU3PUsbRegisterEventCallback, (CyU3PUSBEventCb_t cb))
 SDK_VOID(CyU3PUsbRegisterLPMRequestCallback, (CyU3PUsbLPMReqCb_t cb))
+
+// Capture replies and enforce the EP0 buffer boundary.
+CyU3PReturnStatus_t CyU3PUsbSendEP0Data(uint16_t count, uint8_t *buffer)
+{
+    assert(count <= sizeof(sent_bytes));
+    sent_length = count;
+    memcpy(sent_bytes, buffer, count);
+    return 0;
+}
+
+// Provide the SDK memory helper used to clear reserved packet fields.
+void CyU3PMemSet(uint8_t *data, uint8_t value, uint32_t count)
+{ memset(data, value, count); }
+
+// Return a recognizable firmware uptime for endian checks.
+ULONG CyU3PGetTime(void) { return 0x12345678; }
+
+// Model a GPIF state read failure without initializing the result.
+CyU3PReturnStatus_t CyU3PGpifGetSMState(uint8_t *state)
+{ if (!diagnostic_error) *state = TH1_WAIT; return diagnostic_error; }
+
+// Model link-state reads independently of stream control.
+CyU3PReturnStatus_t CyU3PUsbGetLinkPowerState(CyU3PUsbLinkPowerMode *mode)
+{ if (!diagnostic_error) *mode = CyU3PUsbLPM_U0; return diagnostic_error; }
+
+// Model the hardware's clear-on-read error counters.
+CyU3PReturnStatus_t CyU3PUsbGetErrorCounts(uint16_t *phy, uint16_t *link)
+{
+    if (diagnostic_error) return diagnostic_error;
+    *phy = phy_errors;
+    *link = link_errors;
+    phy_errors = link_errors = 0;
+    return 0;
+}
+
+// Return distinct raw socket counters, descriptors and status without modifying DMA.
+CyU3PReturnStatus_t CyU3PDmaSocketGetConfig(uint16_t id, CyU3PDmaSocketConfig_t *cfg)
+{
+    assert(created);
+    socket_reads++;
+    if (diagnostic_error) return diagnostic_error;
+    cfg->status = 0x80110000;
+    cfg->xferCount = 0x10203040 + id;
+    cfg->dscrChain = 0x00050004;
+    cfg->intr = 0x40;
+    return 0;
+}
+
+// Ensure only the error callback is enabled, with no per-buffer instrumentation.
+void CyU3PPibRegisterCallback(CyU3PPibIntrCb_t cb, uint32_t mask)
+{ assert(cb == pib_error_cb && mask == CYU3P_PIB_INTR_ERROR); }
 
 // Return a stable input level for status and unused SPI reads.
 CyU3PReturnStatus_t CyU3PGpioGetValue(uint8_t pin, CyBool_t *value)
@@ -323,12 +389,90 @@ static void test_failures(void)
     }
 }
 
+// Decode emitted words independently of the production serializer.
+static uint32_t reply_word(unsigned offset)
+{
+    return (uint32_t)sent_bytes[offset] | ((uint32_t)sent_bytes[offset + 1] << 8) |
+        ((uint32_t)sent_bytes[offset + 2] << 16) | ((uint32_t)sent_bytes[offset + 3] << 24);
+}
+
+// Verify capability discovery, request bounds, counter retention and non-invasive reads.
+static void test_diagnostics(void)
+{
+    reset_fixture();
+    assert(handle_req(VR_STAT, 0, 6));
+    assert(sent_length == 6 && sent_bytes[0] == 0x32);
+    assert(sent_bytes[4] == 0xD1 && sent_bytes[5] == 1);
+    assert(handle_req(VR_DIAG, 0, 160));
+    assert(sent_length == 160 && !socket_reads);
+    assert(sent_bytes[24] == CY_U3P_ERROR_NOT_CONFIGURED && reply_word(28) == 0);
+    assert(!usb_setup_cb(0x4C40, 160U << 16));
+    assert(!usb_setup_cb(0x4CC1, 160U << 16));
+    assert(!usb_setup_cb(0x4CC0, (160U << 16) | 1));
+    assert(!usb_setup_cb(0x14CC0, 160U << 16));
+    for (unsigned length = 0; length <= 0xFFFF; length++) {
+        if (length != 160) assert(!usb_setup_cb(0x4CC0, length << 16));
+    }
+    assert(app_start() && start_bulk());
+    phy_errors = 2;
+    link_errors = 3;
+    pib_error_cb(CYU3P_PIB_INTR_ERROR, 0x1005);
+    pib_error_cb(CYU3P_PIB_INTR_DLL_UPDATE, 1);
+    usb_event_cb(CY_U3P_USB_EVENT_LNK_RECOVERY, 0);
+    usb_event_cb(CY_U3P_USB_EVENT_SUSPEND, 0);
+    usb_event_cb(CY_U3P_USB_EVENT_RESUME, 0);
+    lpm_req_cb(CyU3PUsbLPM_U1);
+    assert(usb_setup_cb(0x4CC0, 160U << 16));
+    assert_stream();
+    assert(starts == 1 && socket_reads == 3 && reply_word(12) == 1);
+    assert(!memcmp(sent_bytes, "PDG1\x01\xA0\x32\x70", 8));
+    assert(reply_word(8) == 0x12345678);
+    assert(sent_bytes[17] == TH1_WAIT && sent_bytes[19] == 0);
+    assert(reply_word(32) == 0x10203040 + CY_U3P_PIB_SOCKET_0);
+    assert(reply_word(48) == 0x10203040 + CY_U3P_PIB_SOCKET_1);
+    assert(reply_word(64) == 0x10203040 + CY_U3P_UIB_SOCKET_CONS_6);
+    assert(reply_word(76) == 2 && reply_word(80) == 3);
+    assert(reply_word(92) == 1 && reply_word(96) == 1 && reply_word(104) == 1);
+    assert(reply_word(112) == 1 && reply_word(116) == 0x1005 && reply_word(124) == 1);
+    assert(reply_word(120) == CY_U3P_USB_EVENT_RESUME);
+    int acks = acknowledgements;
+    assert(usb_setup_cb(0x00000102, 0x00000086));
+    assert(acknowledgements == acks); // observe the existing unanswered CLEAR_HALT
+    assert(handle_req(VR_DIAG, 0, 160));
+    assert(reply_word(128) == 1 && reply_word(132) == 0x0102);
+    assert(reply_word(136) == 0x86 && reply_word(140) == 1);
+    assert(reply_word(144) == 0x12345678);
+    assert(usb_setup_cb(0x000000A1, 0x00080000));
+    assert(handle_req(VR_DIAG, 0, 160));
+    assert(reply_word(128) == 2 && reply_word(132) == 0xA1);
+    assert(reply_word(136) == 0x00080000 && reply_word(140) == 1);
+    assert(start_bulk() && handle_req(VR_DIAG, 0, 160));
+    assert(reply_word(12) == 1 && reply_word(76) == 2 && reply_word(80) == 3);
+    phy_errors = 0xFFFF;
+    assert(handle_req(VR_DIAG, 0, 160));
+    assert(sent_bytes[19] == 1 && reply_word(76) == 65537);
+    diagnostic_error = CY_U3P_ERROR_FAILURE;
+    assert(handle_req(VR_DIAG, 0, 160));
+    assert(sent_bytes[17] == 0xFF && sent_bytes[20] == diagnostic_error);
+    assert(sent_bytes[22] == diagnostic_error && sent_bytes[24] == diagnostic_error);
+    assert(reply_word(28) == 0 && reply_word(76) == 65537);
+    diagnostic_error = 0;
+    assert(stop_bulk() && start_bulk() && handle_req(VR_DIAG, 0, 160));
+    assert(reply_word(12) == 2 && reply_word(112) == 1);
+    endpoint = 0; // stack already deconfigured the endpoint
+    usb_event_cb(CY_U3P_USB_EVENT_RESET, 0);
+    assert(handle_req(VR_DIAG, 0, 160));
+    assert(reply_word(84) == 1 && reply_word(112) == 1);
+    assert(sent_bytes[24] == CY_U3P_ERROR_NOT_CONFIGURED);
+}
+
 // Run lifecycle invariants against the actual firmware source.
 int main(void)
 {
     test_capture();
     test_resets();
     test_failures();
-    puts("PocketSDR lifecycle: capture, reset, failure and cleanup checks passed");
+    test_diagnostics();
+    puts("PocketSDR lifecycle: capture, reset, failure, cleanup and diagnostic checks passed");
     return 0;
 }

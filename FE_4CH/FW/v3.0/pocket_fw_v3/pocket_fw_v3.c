@@ -27,11 +27,12 @@
 #include "cyu3i2c.h"
 #include "cyu3gpio.h"
 #include "cyu3pib.h"
+#include "cyu3socket.h"
 #include "cyu3utils.h"
 #include "gpif_conf.h"
 
 // constants and macros --------------------------------------------------------
-#define VER_FW       0x31       // Firmware version
+#define VER_FW       0x32       // Firmware version
 #ifndef F_TCXO
 #define F_TCXO       24000      // TCXO frequency (kHz)
 #endif
@@ -73,6 +74,8 @@
 #define VR_IO_READ   0x4A       // USB vendor request: Read IO port
 #define VR_IO_WRITE  0x4B       // USB vendor request: Write IO port
 
+#define VR_DIAG      0x4C       // USB vendor request: Read diagnostics v1
+
 #define EP_BULK_IN   0x86       // Bulk transfer IN end point
 #define APP_STACK    0x0800     // App thread stack size
 #define APP_PRI      8          // App thread priority
@@ -109,7 +112,15 @@ static uint8_t app_act = 0;         // application active
 static uint8_t bulk_act = 0;        // bulk transfer active
 static uint8_t ep_act = 0;          // bulk endpoint configured
 static uint16_t bulk_size = 0;      // DMA buffer size (bytes)
-static uint8_t EP0BUFF[128] __attribute__ ((aligned (32))); // EP0 data buffer
+static uint8_t EP0BUFF[160] __attribute__ ((aligned (32))); // EP0 data buffer
+
+static uint32_t diag_unhandled_setup, diag_last_setup0, diag_last_setup1;
+static uint32_t diag_clear_halt, diag_last_setup_ms;
+static uint32_t diag_epoch;
+static uint32_t diag_phy_errors, diag_link_errors;
+static volatile uint32_t diag_resets, diag_disconnects, diag_suspends, diag_resumes;
+static volatile uint32_t diag_link_failures, diag_recoveries, diag_underruns;
+static volatile uint32_t diag_pib_errors, diag_last_pib, diag_last_usb, diag_lpm;
 
 // IO ports definitions
 static const uint8_t port_out[] = {RF_SW_A, RF_SW_B, RF_SW_C, RF_SW_D,
@@ -342,6 +353,78 @@ static int save_settings(void)
     return 1;
 }
 
+// Encode a diagnostic word without alignment or host-endian dependencies.
+static void diag_word(uint8_t offset, uint32_t value)
+{
+    for (uint8_t i = 0; i < 4; i++) EP0BUFF[offset + i] = (uint8_t)(value >> (8 * i));
+}
+
+// Count PIB errors without adding per-buffer callbacks to automatic DMA.
+static void pib_error_cb(CyU3PPibIntrType type, uint16_t data)
+{
+    if (type != CYU3P_PIB_INTR_ERROR) return;
+    diag_last_pib = data;
+    diag_pib_errors++;
+}
+
+// Snapshot hardware without stopping GPIF, resetting DMA, or changing USB policy.
+static int read_diagnostics(void)
+{
+    static const uint16_t sockets[] = {
+        CY_U3P_PIB_SOCKET_0, CY_U3P_PIB_SOCKET_1, CY_U3P_UIB_SOCKET_CONS_6};
+    uint8_t gpif = 0xFF;
+    CyU3PUsbLinkPowerMode link = CyU3PUsbLPM_Unknown;
+    uint16_t phy = 0, errors = 0;
+    CyU3PMemSet(EP0BUFF, 0, sizeof(EP0BUFF));
+    diag_word(0, 0x31474450); // PDG1
+    EP0BUFF[4] = 1;
+    EP0BUFF[5] = sizeof(EP0BUFF);
+    EP0BUFF[6] = VER_FW;
+    EP0BUFF[7] = (app_act << 5) | (bulk_act << 4) | (ep_act << 6);
+    diag_word(8, CyU3PGetTime());
+    diag_word(12, diag_epoch);
+    EP0BUFF[16] = CyU3PUsbGetSpeed();
+    EP0BUFF[20] = CyU3PGpifGetSMState(&gpif);
+    EP0BUFF[17] = gpif;
+    EP0BUFF[21] = CyU3PUsbGetLinkPowerState(&link);
+    EP0BUFF[18] = (uint8_t)link;
+    EP0BUFF[22] = CyU3PUsbGetErrorCounts(&phy, &errors);
+    if (EP0BUFF[22] == CY_U3P_SUCCESS) {
+        diag_phy_errors += phy;
+        diag_link_errors += errors;
+        EP0BUFF[19] = (phy == 0xFFFF) | ((errors == 0xFFFF) << 1);
+    }
+    for (uint8_t i = 0; i < 3; i++) {
+        CyU3PDmaSocketConfig_t socket = {0};
+        EP0BUFF[24 + i] = app_act ? CyU3PDmaSocketGetConfig(sockets[i], &socket) :
+            CY_U3P_ERROR_NOT_CONFIGURED;
+        if (EP0BUFF[24 + i] != CY_U3P_SUCCESS) continue;
+        diag_word(28 + 16 * i, socket.status);
+        diag_word(32 + 16 * i, socket.xferCount);
+        diag_word(36 + 16 * i, socket.dscrChain);
+        diag_word(40 + 16 * i, socket.intr);
+    }
+    diag_word(76, diag_phy_errors);
+    diag_word(80, diag_link_errors);
+    diag_word(84, diag_resets);
+    diag_word(88, diag_disconnects);
+    diag_word(92, diag_suspends);
+    diag_word(96, diag_resumes);
+    diag_word(100, diag_link_failures);
+    diag_word(104, diag_recoveries);
+    diag_word(108, diag_underruns);
+    diag_word(112, diag_pib_errors);
+    diag_word(116, diag_last_pib);
+    diag_word(120, diag_last_usb);
+    diag_word(124, diag_lpm);
+    diag_word(128, diag_unhandled_setup);
+    diag_word(132, diag_last_setup0);
+    diag_word(136, diag_last_setup1);
+    diag_word(140, diag_clear_halt);
+    diag_word(144, diag_last_setup_ms);
+    return !CyU3PUsbSendEP0Data(sizeof(EP0BUFF), EP0BUFF);
+}
+
 // stop bulk transfer ----------------------------------------------------------
 static int stop_bulk(void)
 {
@@ -371,6 +454,7 @@ static int start_bulk(void)
         stop_bulk();
         return 0;
     }
+    diag_epoch++;
     bulk_act = 1;
     return 1;
 }
@@ -478,6 +562,7 @@ static int set_dev_desc(void)
 //  Write EEPROM            0x49  O  address       n  data (n <= 64)
 //  Read IO port            0x4A  I  IO port       1  0:off, 1:on
 //  Write IO port           0x4B  O  IO port       1  0:off, 1:on
+//  Read diagnostics v1     0x4C  I  0           160  See ../tests/diagnostics.md
 //
 //  * bit15-8= MAX2771 CH (0:CH1,1:CH2,...), bit7-0= MAX2771 register address
 //
@@ -493,9 +578,13 @@ static int handle_req(uint8_t req, uint16_t val, uint16_t len)
         EP0BUFF[1] = (uint8_t)((F_TCXO >> 8) & 0xFF);
         EP0BUFF[2] = (uint8_t)(F_TCXO & 0xFF);
         EP0BUFF[3] = stat;
-        EP0BUFF[4] = 0;
-        EP0BUFF[5] = 0;
+        EP0BUFF[4] = 0xD1; // diagnostics capability signature
+        EP0BUFF[5] = 1; // diagnostic protocol version
         return !CyU3PUsbSendEP0Data(6, EP0BUFF);
+    }
+    else if (req == VR_DIAG) {
+        if (val != 0 || len != sizeof(EP0BUFF)) return 0;
+        return read_diagnostics();
     }
     else if (req == VR_REG_READ) {
         uint32_t reg = read_reg(ch, addr);
@@ -563,6 +652,9 @@ static CyBool_t usb_setup_cb(uint32_t data0, uint32_t data1)
     len = (data1 & CY_U3P_USB_LENGTH_MASK ) >> CY_U3P_USB_LENGTH_POS;
     
     if (type == CY_U3P_USB_VENDOR_RQT) {
+        if (req == VR_DIAG && ((data0 & 0xFF) != 0xC0 || (data1 & 0xFFFF) != 0)) {
+            return CyFalse;
+        }
         return handle_req(req, val, len);
     }
     else if (type == CY_U3P_USB_STANDARD_RQT &&
@@ -575,12 +667,38 @@ static CyBool_t usb_setup_cb(uint32_t data0, uint32_t data1)
             CyU3PUsbStall(0, CyTrue, CyFalse);
         }
     }
+    else {
+        diag_unhandled_setup++;
+        diag_last_setup0 = data0;
+        diag_last_setup1 = data1;
+        diag_last_setup_ms = CyU3PGetTime();
+        if (type == CY_U3P_USB_STANDARD_RQT && target == CY_U3P_USB_TARGET_ENDPT &&
+            req == CY_U3P_USB_SC_CLEAR_FEATURE && val == 0 &&
+            (data1 & 0xFFFF) == EP_BULK_IN) {
+            diag_clear_halt++;
+        }
+    }
     return CyTrue;
 }
 
 // USB event callback ----------------------------------------------------------
 static void usb_event_cb(CyU3PUsbEventType_t event, uint16_t data)
 {
+    switch (event) {
+        case CY_U3P_USB_EVENT_RESET: diag_resets++; break;
+        case CY_U3P_USB_EVENT_DISCONNECT: diag_disconnects++; break;
+        case CY_U3P_USB_EVENT_SUSPEND: diag_suspends++; break;
+        case CY_U3P_USB_EVENT_RESUME: diag_resumes++; break;
+        case CY_U3P_USB_EVENT_USB3_LNKFAIL:
+        case CY_U3P_USB_EVENT_SS_COMP_ENTRY:
+        case CY_U3P_USB_EVENT_LMP_EXCH_FAIL: diag_link_failures++; break;
+        case CY_U3P_USB_EVENT_LNK_RECOVERY: diag_recoveries++; break;
+        case CY_U3P_USB_EVENT_EP_UNDERRUN: diag_underruns++; break;
+        default: break;
+    }
+    if (event != CY_U3P_USB_EVENT_SOF_ITP && event != CY_U3P_USB_EVENT_EP0_STAT_CPLT) {
+        diag_last_usb = ((uint32_t)data << 16) | event;
+    }
     if (event == CY_U3P_USB_EVENT_SETCONF) {
         CyU3PUsbLPMDisable();
         if (!app_stop(CyFalse) || !app_start()) {
@@ -602,6 +720,7 @@ static void usb_event_cb(CyU3PUsbEventType_t event, uint16_t data)
 // USB 3.0 LPM request callback ------------------------------------------------
 static CyBool_t lpm_req_cb(CyU3PUsbLinkPowerMode link_mode)
 {
+    diag_lpm++;
     return CyTrue;
 }
 
@@ -613,6 +732,7 @@ static int app_init(void)
     pclk.clkDiv = 2;
     pclk.clkSrc = CY_U3P_SYS_CLK;
     if (CyU3PPibInit(CyTrue, &pclk)) return 0;
+    CyU3PPibRegisterCallback(pib_error_cb, CYU3P_PIB_INTR_ERROR);
     
     // load GPIF configuration
     if (CyU3PGpifLoad(&CyFxGpifConfig)) return 0;
